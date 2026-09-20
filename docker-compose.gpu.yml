@@ -1,0 +1,70 @@
+# Overlay for a physical PC with NVIDIA GPU + ≥32 GB RAM.
+# GTX 1660 Ti 6 GB: chat offloads to CUDA (ngl=99), embeddings take a small
+# GPU slice first, whisper stays on CPU so VRAM is not stolen.
+#
+#   docker compose --env-file env/gpu-1660ti.env \
+#     -f docker-compose.yml -f docker-compose.gpu.yml --profile stt up --build -d
+#
+name: localnexus
+
+services:
+  llm:
+    image: localnexus-llama-server:cuda
+    build:
+      context: .
+      dockerfile: docker/llama.cpp.cuda.Dockerfile
+      args:
+        CUDA_ARCHITECTURES: ${CUDA_ARCHITECTURES:-75}
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    depends_on:
+      modelsync:
+        condition: service_completed_successfully
+      embed:
+        condition: service_healthy
+    mem_limit: ${LLM_MEM_LIMIT:-20g}
+    cpus: 8.0
+
+  embed:
+    image: localnexus-llama-server:cuda
+    build:
+      context: .
+      dockerfile: docker/llama.cpp.cuda.Dockerfile
+      args:
+        CUDA_ARCHITECTURES: ${CUDA_ARCHITECTURES:-75}
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    command:
+      - -m
+      - /models/qwen-embed.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - --embedding
+      - --pooling
+      - last
+      - -c
+      - "512"
+      - -ub
+      - "512"
+      - -t
+      - "2"
+      - -ngl
+      - "99"
+      - --alias
+      - qwen-embed
+    mem_limit: 3g
+    cpus: 2.0
+
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-medium}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+    mem_limit: 3g

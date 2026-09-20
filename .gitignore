@@ -1,4 +1,6 @@
 .env
+host.auto.env
+llama-server
 models/
 data/
 tei-data/
@@ -8,3 +10,4 @@ tei-data/
 Thumbs.db
 __pycache__/
 .venv/
+.venv-whisper/

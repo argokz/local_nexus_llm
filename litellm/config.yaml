@@ -5,7 +5,7 @@ model_list:
   - model_name: qwen-chat
     litellm_params:
       model: openai/qwen-chat
-      api_base: http://llm:8001/v1
+      api_base: os.environ/CHAT_API_BASE
       api_key: sk-backend
       timeout: 180
     model_info:
@@ -22,11 +22,12 @@ model_list:
       mode: embedding
     rpm: 30
 
-  # Live only with: docker compose --profile stt up -d
+  # Host: scripts/start-whisper.sh  (WHISPER_API_BASE=http://127.0.0.1:8000/v1)
+  # Docker: docker compose --profile stt up -d
   - model_name: whisper-1
     litellm_params:
       model: openai/whisper-1
-      api_base: http://whisper:8000/v1
+      api_base: os.environ/WHISPER_API_BASE
       api_key: sk-backend
       timeout: 300
     model_info:

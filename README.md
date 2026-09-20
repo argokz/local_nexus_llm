@@ -1,20 +1,93 @@
 # localNexus sandbox (this PC)
 
-Песочница перед нормальным железом. Клиенты ходят **только в LiteLLM** (`:4000`). Движки за прокси с LAN не торчат.
+Песочница перед нормальным железом. Клиенты ходят **только в LiteLLM** (`:4000`) — кроме Linux native-режима ниже, где можно стучаться прямо в llama-server. Движки за прокси с LAN не торчат.
 
 ```
 Клиент / OpenAI SDK / Admin UI
         │
         ▼
- LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF Q4, CPU)
+ LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF, CPU; CUDA если есть GPU)
         │       ──► llama.cpp  qwen-embed  (слот TEI на этой CPU)
-        │       ──► faster-whisper         (профиль stt, не в первом up)
+        │       ──► faster-whisper         (host :8000 / Compose --profile stt)
         └──────► Postgres + pgvector       (ключи LiteLLM + чанки RAG)
 ```
 
+Два профиля железа:
+
+| Профиль | Железо | Модель chat (алиас всё равно `qwen-chat`) |
+|---|---|---|
+| **sandbox** | Windows i7-2600, только AVX, нет GPU | Qwen3-4B Q4_K_M |
+| **host** | Linux AVX2+, ≥14 GB RAM, без GPU | Qwen3.5-9B Q5_K_M |
+| **gpu-1660ti** | GTX 1660 Ti 6 GB + 32 GB RAM, Docker CUDA | Qwen3.5-35B-A3B Q3_K_M (MoE, 3B active) |
+
 На i7-2600 нет AVX2. Ollama и готовый TEI CPU-образ часто падают с `Illegal instruction`. Поэтому эмбеддинги в первом прогоне — тот же llama.cpp, алиас в LiteLLM всё равно `qwen-embed`. TEI включается профилем, когда CPU умеет AVX2.
 
-## 0. Docker Desktop
+## Linux (этот хост)
+
+Рабочая копия: **`~/projects/localNexus`** (на Windows — `H:\projects\localNexus`).
+
+Этот Cloud Agent **без GPU**: нет `nvidia-smi`, нет `/dev/nvidia*`, нет `/dev/dri`. `LLAMA_NGL=0`, chat/embed/whisper идут на CPU (AVX-512/AMX).
+
+На 16 GB RAM Docker с 9B внутри не влезает. Полный контур **без Docker**:
+
+`llama-server` на хосте → **LiteLLM :4000** → Postgres/pgvector → faster-whisper `:8000`.
+
+```bash
+mkdir -p ~/projects
+# если репозиторий ещё не здесь:
+#   git clone <url> ~/projects/localNexus
+cd ~/projects/localNexus
+chmod +x scripts/*.sh
+./scripts/start-stack.sh        # detect + llama + postgres + whisper + LiteLLM
+./scripts/smoke-test.sh         # /v1/models, chat, embeddings, RAG, whisper
+./scripts/create-key.sh dev-ivan
+```
+
+Стоп движков: `./scripts/start-stack.sh stop` (Postgres остаётся).
+
+Клиенты ходят **только** в LiteLLM:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:4000/v1", api_key="sk-КЛЮЧ")
+client.chat.completions.create(model="qwen-chat", messages=[{"role": "user", "content": "ping"}])
+client.embeddings.create(model="qwen-embed", input="hello")
+```
+
+Админка: http://127.0.0.1:4000/ui — пользователь `admin`, пароль = `LITELLM_MASTER_KEY`.
+
+Прямой llama-server (`:8001` / `:8003`) и whisper (`:8000`) — только localhost, для отладки.
+
+## Docker + GTX 1660 Ti 6 GB + 32 GB RAM
+
+На Cloud Agent GPU **нет** (16 GB, без NVIDIA, без Docker). Этот профиль — для физического ПК.
+
+6 GB VRAM не держат 9B/35B целиком. Схема: **CUDA offload (`-ngl 99`)** + веса в 32 GB RAM. Chat — Qwen3.5-35B-A3B Q3 (~16.4 GB, MoE 3B active, хорошо ложится на Turing). Embeddings 0.6B тоже на GPU (стартуют первыми, ~0.7 GB). Whisper **medium на CPU**, чтобы не отбирать VRAM у llama.cpp.
+
+Docker Desktop: RAM **24 GB**, диск образов на быстрый диск, WSL2 + GPU.
+
+```powershell
+cd H:\projects\localNexus   # или ~/projects/localNexus
+.\scripts\gpu-check.ps1     # nvidia-smi + docker --gpus all
+.\scripts\start-docker.ps1  # качает 35B-A3B, собирает CUDA llama.cpp, compose up
+.\scripts\smoke-test.ps1
+```
+
+Linux:
+
+```bash
+./scripts/gpu-check.sh
+./scripts/start-docker.sh
+./scripts/smoke-test.sh
+```
+
+Первая сборка `docker/llama.cpp.cuda.Dockerfile` (sm_75) — 10–20 минут. Модель ~16 GB качается один раз в `./models`.
+
+Стоп: `.\scripts\start-docker.ps1 stop`
+
+Клиенты по-прежнему только `:4000`. Если нужен whisper на CUDA — освободите VRAM (`LLAMA_NGL` меньше) и смените образ whisper на `latest-cuda`; на 6 GB вместе с 35B это обычно OOM.
+
+## 0. Docker Desktop (песочница i7-2600 без 1660 Ti)
 
 Settings → Resources:
 
@@ -122,15 +195,23 @@ docker compose --profile tei up -d tei
 docker compose up -d litellm
 ```
 
-Whisper:
+Whisper (Linux host, **без Docker**):
+
+```bash
+./scripts/start-whisper.sh          # medium int8 на CPU, если после 9B свободно ≥2.2 GB
+```
+
+Почему medium сразу не поднялся: native `start-stack.sh` раньше не запускал STT. В Compose это отдельный `--profile stt`, и там стоит **small**, не medium. На этой машине нет CUDA, а Qwen3.5-9B Q5 уже занимает ~9 GB RSS при 16 GB без swap — medium (~1.5 GB int8) ставится отдельно и только если хватает `MemAvailable`. `large-v3` на этом CPU не включайте.
+
+Windows Compose:
 
 ```powershell
 docker compose --profile stt up -d whisper
 ```
 
-Потом в UI можно выдать ключу модель `whisper-1`. На этом CPU `large-v3` не включайте — только `small`.
+Потом в UI можно выдать ключу модель `whisper-1`.
 
-GPU позже: в `.env` `LLAMA_NGL=99`, пересборка llama.cpp с CUDA, TEI-образ `cuda-*`. Клиенты и ключи не меняются.
+На ПК с 1660 Ti полный Docker-контур (включая medium STT) поднимает `.\scripts\start-docker.ps1`, а не `--profile stt` поверх AVX-сборки.
 
 ## 5. Что смотреть, если не встаёт
 
@@ -138,7 +219,8 @@ GPU позже: в `.env` `LLAMA_NGL=99`, пересборка llama.cpp с CUDA
 |---|---|
 | `Illegal instruction` | ожидаемо для Ollama/TEI на i7-2600; LLM собирается своим Dockerfile |
 | LiteLLM вечно `created` | `docker compose logs llm` — модель ещё грузится |
-| OOM / диск C: забит | образы на H:, RAM Docker 22–24 GB, не включайте `stt`+`tei` сразу |
+| `nvidia-smi` нет / Docker без GPU | это Cloud Agent или драйвер/WSL2 GPU выключен; стек 1660 Ti только на физическом ПК |
+| CUDA OOM на 6 GB | whisper оставьте на CPU; не включайте TEI cuda вместе с ngl=99 |
 | chat 180s timeout | нормально медленно; увеличьте timeout клиента, не размер модели |
 | UI просит пароль | это `LITELLM_MASTER_KEY`, не пароль Postgres |
 

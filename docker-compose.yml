@@ -1,5 +1,9 @@
 name: localnexus
 
+# Default: AVX sandbox (i7-2600). GPU PC (1660 Ti 6GB + 32GB RAM):
+#   docker compose --env-file env/gpu-1660ti.env -f docker-compose.yml -f docker-compose.gpu.yml --profile stt up --build -d
+#   or .\scripts\start-docker.ps1
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -41,10 +45,12 @@ services:
     command: ["bash", "-lc", "cp -nv /src/*.gguf /dst/ && ls -lh /dst"]
 
   llm:
-    image: localnexus-llama-server:avx
+    image: localnexus-llama-server:${LLAMA_CPU_VARIANT:-avx}
     build:
       context: .
       dockerfile: docker/llama.cpp.Dockerfile
+      args:
+        LLAMA_CPU_VARIANT: ${LLAMA_CPU_VARIANT:-avx}
     restart: unless-stopped
     depends_on:
       modelsync:
@@ -77,14 +83,16 @@ services:
       timeout: 5s
       retries: 40
       start_period: 300s
-    mem_limit: 8g
+    mem_limit: ${LLM_MEM_LIMIT:-8g}
     cpus: 4.0
 
   embed:
-    image: localnexus-llama-server:avx
+    image: localnexus-llama-server:${LLAMA_CPU_VARIANT:-avx}
     build:
       context: .
       dockerfile: docker/llama.cpp.Dockerfile
+      args:
+        LLAMA_CPU_VARIANT: ${LLAMA_CPU_VARIANT:-avx}
     restart: unless-stopped
     depends_on:
       modelsync:
@@ -147,6 +155,7 @@ services:
     image: fedirz/faster-whisper-server:latest-cpu
     restart: unless-stopped
     environment:
+      # Windows sandbox / Compose: small. Linux host without Docker uses scripts/start-whisper.sh (medium on CPU if RAM allows).
       WHISPER_MODEL: Systran/faster-whisper-small
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
@@ -157,17 +166,23 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
       llm:
         condition: service_healthy
+        required: false
       embed:
         condition: service_healthy
+        required: false
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-localnexus-admin}
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@db:5432/${POSTGRES_DB:-nexus}
+      CHAT_API_BASE: ${CHAT_API_BASE:-http://llm:8001/v1}
       EMBED_API_BASE: ${EMBED_API_BASE:-http://embed:8003/v1}
+      WHISPER_API_BASE: ${WHISPER_API_BASE:-http://whisper:8000/v1}
       STORE_MODEL_IN_DB: "True"
       LITELLM_LOG: INFO
     volumes:
