@@ -1,0 +1,44 @@
+# Sandbox routing. Clients only talk to LiteLLM (:4000).
+# Backends are swapped by changing api_base / compose profiles, not client code.
+
+model_list:
+  - model_name: qwen-chat
+    litellm_params:
+      model: openai/qwen-chat
+      api_base: http://llm:8001/v1
+      api_key: sk-backend
+      timeout: 180
+    model_info:
+      mode: chat
+    rpm: 4
+
+  - model_name: qwen-embed
+    litellm_params:
+      model: openai/qwen-embed
+      api_base: os.environ/EMBED_API_BASE
+      api_key: sk-backend
+      timeout: 60
+    model_info:
+      mode: embedding
+    rpm: 30
+
+  # Live only with: docker compose --profile stt up -d
+  - model_name: whisper-1
+    litellm_params:
+      model: openai/whisper-1
+      api_base: http://whisper:8000/v1
+      api_key: sk-backend
+      timeout: 300
+    model_info:
+      mode: audio_transcription
+    rpm: 2
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 180
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  allow_requests_on_db_unavailable: false

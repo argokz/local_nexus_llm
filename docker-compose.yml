@@ -1,0 +1,189 @@
+name: localnexus
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus}
+      POSTGRES_DB: ${POSTGRES_DB:-nexus}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus} -d ${POSTGRES_DB:-nexus}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+
+  dbschema:
+    image: pgvector/pgvector:pg16
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-nexus}
+    volumes:
+      - ./sql/01-init.sql:/sql/01-init.sql:ro
+    entrypoint: ["psql"]
+    command: ["-h", "db", "-U", "${POSTGRES_USER:-nexus}", "-d", "${POSTGRES_DB:-nexus}", "-v", "ON_ERROR_STOP=1", "-f", "/sql/01-init.sql"]
+
+  # Copy GGUF from the Windows bind mount into a Linux volume (9p mmap is too slow).
+  modelsync:
+    image: debian:bookworm-slim
+    volumes:
+      - ./models:/src:ro
+      - gguf:/dst
+    command: ["bash", "-lc", "cp -nv /src/*.gguf /dst/ && ls -lh /dst"]
+
+  llm:
+    image: localnexus-llama-server:avx
+    build:
+      context: .
+      dockerfile: docker/llama.cpp.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      modelsync:
+        condition: service_completed_successfully
+    command:
+      - -m
+      - /models/qwen-chat.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - -c
+      - "${LLAMA_CTX:-4096}"
+      - -t
+      - "${LLAMA_THREADS:-4}"
+      - -ngl
+      - "${LLAMA_NGL:-0}"
+      - --alias
+      - qwen-chat
+      - --jinja
+      - --reasoning
+      - "off"
+    volumes:
+      - gguf:/models:ro
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 300s
+    mem_limit: 8g
+    cpus: 4.0
+
+  embed:
+    image: localnexus-llama-server:avx
+    build:
+      context: .
+      dockerfile: docker/llama.cpp.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      modelsync:
+        condition: service_completed_successfully
+    command:
+      - -m
+      - /models/qwen-embed.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - --embedding
+      - --pooling
+      - last
+      - -c
+      - "512"
+      - -ub
+      - "512"
+      - -t
+      - "2"
+      - -ngl
+      - "0"
+      - --alias
+      - qwen-embed
+    volumes:
+      - gguf:/models:ro
+    expose:
+      - "8003"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    mem_limit: 3g
+    cpus: 2.0
+
+  # Official TEI CPU image. On i7-2600 it often dies with SIGILL (AVX2).
+  # Try: docker compose --profile tei up -d tei
+  # Then set EMBED_API_BASE=http://tei:80/v1 and recreate litellm.
+  tei:
+    profiles: ["tei"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    restart: unless-stopped
+    command:
+      - --model-id
+      - Qwen/Qwen3-Embedding-0.6B
+      - --pooling
+      - last
+      - --port
+      - "80"
+    volumes:
+      - tei-data:/data
+    expose:
+      - "80"
+    mem_limit: 3g
+
+  whisper:
+    profiles: ["stt"]
+    image: fedirz/faster-whisper-server:latest-cpu
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: Systran/faster-whisper-small
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+    expose:
+      - "8000"
+    mem_limit: 2g
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      llm:
+        condition: service_healthy
+      embed:
+        condition: service_healthy
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-localnexus-admin}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@db:5432/${POSTGRES_DB:-nexus}
+      EMBED_API_BASE: ${EMBED_API_BASE:-http://embed:8003/v1}
+      STORE_MODEL_IN_DB: "True"
+      LITELLM_LOG: INFO
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+    mem_limit: 1g
+
+volumes:
+  pgdata:
+  tei-data:
+  gguf:
