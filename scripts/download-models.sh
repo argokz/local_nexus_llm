@@ -9,6 +9,12 @@ mkdir -p "$MODELS"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/_env.sh"
+if [[ -n "${NEXUS_ENV_FILE:-}" && -f "$NEXUS_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source <(sed 's/\r$//' "$NEXUS_ENV_FILE")
+  set +a
+fi
 
 CHAT_HF_REPO="${CHAT_HF_REPO:-unsloth/Qwen3-4B-GGUF}"
 CHAT_HF_FILE="${CHAT_HF_FILE:-Qwen3-4B-Q4_K_M.gguf}"

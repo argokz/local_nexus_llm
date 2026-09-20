@@ -44,13 +44,28 @@ elif [[ -e /dev/nvidia0 ]]; then
 fi
 [[ -e /dev/dri/renderD128 ]] && HAS_DRM=1
 
+GPU_NAME=none
+GPU_VRAM_MB=0
+if [[ "$HAS_NVIDIA" -eq 1 ]]; then
+  GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || echo nvidia)"
+  GPU_VRAM_MB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' || echo 0)"
+fi
+
 if [[ "$HAS_AVX2" -eq 1 || "$HAS_AVX512" -eq 1 ]]; then
   CPU_VARIANT=native
 fi
 
 # Pick the strongest GGUF that still leaves RAM for OS + llama-server + optional embed.
 # Weights are mmap'd; keep ~3–4 GB headroom above the file size.
-if [[ "$HAS_NVIDIA" -eq 1 ]]; then
+if [[ "$HAS_NVIDIA" -eq 1 && "$MEM_GB" -ge 28 ]]; then
+  # 1660 Ti 6GB + 32GB RAM: 35B MoE (3B active) in RAM, CUDA offload fills VRAM.
+  PROFILE=gpu-1660ti-32g
+  CPU_VARIANT=cuda
+  CHAT_HF_REPO="unsloth/Qwen3.5-35B-A3B-GGUF"
+  CHAT_HF_FILE="Qwen3.5-35B-A3B-Q3_K_M.gguf"
+  CTX=8192
+  LLM_MEM_LIMIT=20g
+elif [[ "$HAS_NVIDIA" -eq 1 ]]; then
   PROFILE=gpu
   CHAT_HF_REPO="unsloth/Qwen3.5-9B-GGUF"
   CHAT_HF_FILE="Qwen3.5-9B-Q5_K_M.gguf"
@@ -85,9 +100,16 @@ WHISPER_COMPUTE_TYPE=int8
 WHISPER_MODEL=small
 if [[ "$HAS_NVIDIA" -eq 1 ]]; then
   NGL=99
-  WHISPER_DEVICE=cuda
-  WHISPER_COMPUTE_TYPE=float16
-  WHISPER_MODEL=medium
+  # 6 GB cards: keep whisper on CPU so llama.cpp can fill VRAM.
+  if [[ "${GPU_VRAM_MB:-0}" -ge 10000 ]]; then
+    WHISPER_DEVICE=cuda
+    WHISPER_COMPUTE_TYPE=float16
+    WHISPER_MODEL=medium
+  else
+    WHISPER_DEVICE=cpu
+    WHISPER_COMPUTE_TYPE=int8
+    WHISPER_MODEL=medium
+  fi
 elif [[ "$MEM_GB" -ge 14 ]]; then
   # 16 GB host: try medium int8; start-whisper.sh falls back to small if 9B left too little RAM.
   WHISPER_MODEL=medium
@@ -111,11 +133,14 @@ WHISPER_DEVICE=$WHISPER_DEVICE
 WHISPER_COMPUTE_TYPE=$WHISPER_COMPUTE_TYPE
 WHISPER_MODEL=$WHISPER_MODEL
 WHISPER_PORT=8000
+GPU_NAME="$GPU_NAME"
+GPU_VRAM_MB=$GPU_VRAM_MB
 EOF
 
 {
   echo "mem_total_gb=$MEM_GB mem_avail_gb=$AVAIL_GB threads=$THREADS"
   echo "avx2=$HAS_AVX2 avx512=$HAS_AVX512 amx=$HAS_AMX nvidia=$HAS_NVIDIA drm=$HAS_DRM"
+  echo "gpu_name=$GPU_NAME gpu_vram_mb=$GPU_VRAM_MB"
   echo "cpu_variant=$CPU_VARIANT profile=$PROFILE"
   echo "chat=$CHAT_HF_REPO/$CHAT_HF_FILE ctx=$CTX ngl=$NGL"
   echo "whisper device=$WHISPER_DEVICE compute=$WHISPER_COMPUTE_TYPE model=$WHISPER_MODEL"

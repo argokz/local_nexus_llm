@@ -1,5 +1,9 @@
 name: localnexus
 
+# Default: AVX sandbox (i7-2600). GPU PC (1660 Ti 6GB + 32GB RAM):
+#   docker compose --env-file env/gpu-1660ti.env -f docker-compose.yml -f docker-compose.gpu.yml --profile stt up --build -d
+#   or .\scripts\start-docker.ps1
+
 services:
   db:
     image: pgvector/pgvector:pg16
