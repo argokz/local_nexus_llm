@@ -7,15 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS="$ROOT/models"
 mkdir -p "$MODELS"
 
-if [[ -f "$ROOT/host.auto.env" ]]; then
-  # shellcheck disable=SC1091
-  source "$ROOT/host.auto.env"
-elif [[ -f "$ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT/.env"
-  set +a
-fi
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_env.sh"
 
 CHAT_HF_REPO="${CHAT_HF_REPO:-unsloth/Qwen3-4B-GGUF}"
 CHAT_HF_FILE="${CHAT_HF_FILE:-Qwen3-4B-Q4_K_M.gguf}"

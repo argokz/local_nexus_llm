@@ -3,12 +3,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MASTER="sk-localnexus-admin"
-if [[ -f "$ROOT/.env" ]]; then
-  # shellcheck disable=SC1091
-  set -a && source "$ROOT/.env" && set +a
-  MASTER="${LITELLM_MASTER_KEY:-$MASTER}"
-fi
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_env.sh"
+MASTER="${LITELLM_MASTER_KEY:-sk-localnexus-admin}"
 
 ALIAS="${1:-sandbox-dev}"
 RESP="$(curl -fsS http://127.0.0.1:4000/key/generate \

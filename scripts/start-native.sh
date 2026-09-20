@@ -3,14 +3,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[[ -f "$ROOT/host.auto.env" ]] && source "$ROOT/host.auto.env"
-[[ -f "$ROOT/.env" ]] && set -a && source "$ROOT/.env" && set +a
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_env.sh"
 
 CHAT_GGUF="${CHAT_GGUF:-qwen-chat.gguf}"
 EMBED_GGUF="${EMBED_GGUF:-qwen-embed.gguf}"
 THREADS="${LLAMA_THREADS:-$(nproc)}"
 CTX="${LLAMA_CTX:-4096}"
 NGL="${LLAMA_NGL:-0}"
+PARALLEL="${LLAMA_PARALLEL:-1}"
 CHAT_PORT="${CHAT_PORT:-8001}"
 EMBED_PORT="${EMBED_PORT:-8003}"
 HOST_BIND="${HOST_BIND:-0.0.0.0}"
@@ -61,11 +62,11 @@ fi
 stop_pid "$PID_DIR/chat.pid"
 stop_pid "$PID_DIR/embed.pid"
 
-echo "Starting chat $CHAT_PATH on :$CHAT_PORT (threads=$THREADS ctx=$CTX ngl=$NGL)"
+echo "Starting chat $CHAT_PATH on :$CHAT_PORT (threads=$THREADS ctx=$CTX ngl=$NGL parallel=$PARALLEL)"
 nohup "$BIN" \
   -m "$CHAT_PATH" \
   --host "$HOST_BIND" --port "$CHAT_PORT" \
-  -c "$CTX" -t "$THREADS" -ngl "$NGL" \
+  -c "$CTX" -t "$THREADS" -ngl "$NGL" -np "$PARALLEL" \
   --alias qwen-chat \
   --jinja --reasoning off \
   >"$LOG_DIR/chat.log" 2>&1 &

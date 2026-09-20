@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[[ -f "$ROOT/host.auto.env" ]] && source "$ROOT/host.auto.env"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_env.sh"
 
 LLAMA_SRC="${LLAMA_SRC:-$HOME/src/llama.cpp}"
 LLAMA_BUILD_DIR="${LLAMA_BUILD_DIR:-$LLAMA_SRC/build}"

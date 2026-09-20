@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[[ -f "$ROOT/.env" ]] && set -a && source "$ROOT/.env" && set +a
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_env.sh"
 
 MASTER="${LITELLM_MASTER_KEY:-sk-localnexus-admin}"
 BASE="${LITELLM_URL:-}"
