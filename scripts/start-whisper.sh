@@ -80,7 +80,15 @@ ensure_swap() {
     sudo chmod 600 "$swapfile"
     sudo mkswap "$swapfile" >/dev/null
   fi
-  sudo swapon "$swapfile" 2>/dev/null || true
+  local swapon_bin
+  swapon_bin="$(command -v swapon || true)"
+  [[ -x /sbin/swapon ]] && swapon_bin=/sbin/swapon
+  [[ -x /usr/sbin/swapon ]] && swapon_bin=/usr/sbin/swapon
+  if [[ -n "${swapon_bin}" ]]; then
+    sudo "$swapon_bin" "$swapfile" 2>/dev/null || true
+  else
+    echo "swapon not found; continuing without swap"
+  fi
   echo "SwapTotal=$(awk '/SwapTotal:/ {print $2}' /proc/meminfo) kB"
 }
 
