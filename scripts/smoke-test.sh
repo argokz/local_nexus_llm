@@ -11,7 +11,10 @@ BASE="${LITELLM_URL:-}"
 MODE="${SMOKE_MODE:-auto}"
 
 if [[ -z "$BASE" ]]; then
-  if [[ "$MODE" == "native" ]] || { [[ "$MODE" == "auto" ]] && curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; }; then
+  if [[ "$MODE" != "native" ]] && curl -fsS http://127.0.0.1:4000/health/liveliness >/dev/null 2>&1; then
+    BASE="http://127.0.0.1:4000"
+    echo "== LiteLLM $BASE =="
+  elif curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
     BASE="http://127.0.0.1:8001"
     MASTER="sk-backend"
     echo "== native llama-server $BASE =="
@@ -64,6 +67,19 @@ if curl -fsS http://127.0.0.1:8003/health >/dev/null 2>&1 || [[ "$BASE" == *":40
   echo "dim=$dim"
 fi
 
+if [[ "$BASE" == *":4000"* ]]; then
+  echo "== RAG (LiteLLM + pgvector) =="
+  PY="${ROOT}/.venv/bin/python3"
+  [[ -x "$PY" ]] || PY=python3
+  LITELLM_URL="$BASE/v1" \
+  LITELLM_MASTER_KEY="$MASTER" \
+  DATABASE_URL="${DATABASE_URL:-postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@127.0.0.1:5432/${POSTGRES_DB:-nexus}}" \
+  "$PY" "$ROOT/scripts/rag_smoke.py"
+fi
+
 echo
 echo "API: $BASE/v1"
 echo "Chat model alias: qwen-chat"
+if [[ "$BASE" == *":4000"* ]]; then
+  echo "Admin UI: $BASE/ui  (admin / $MASTER)"
+fi

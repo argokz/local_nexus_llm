@@ -21,30 +21,33 @@
 
 На i7-2600 нет AVX2. Ollama и готовый TEI CPU-образ часто падают с `Illegal instruction`. Поэтому эмбеддинги в первом прогоне — тот же llama.cpp, алиас в LiteLLM всё равно `qwen-embed`. TEI включается профилем, когда CPU умеет AVX2.
 
-## Linux (этот хост, без Docker)
+## Linux (этот хост)
 
-На машине без NVIDIA, с AVX2+ и ~16 GB RAM Docker не обязателен: mmap GGUF с диска + нативный `llama-server` съедает меньше RAM, чем Compose.
+На 16 GB RAM Docker с 9B внутри не влезает. Полный контур здесь:
+
+`llama-server` на хосте (AVX-512/AMX) → **LiteLLM :4000** → Postgres/pgvector.
 
 ```bash
 chmod +x scripts/*.sh
-./scripts/detect-hw.sh          # пишет host.auto.env (не коммитить)
-./scripts/download-models.sh    # Qwen3.5-9B Q5 + Qwen3-Embedding-0.6B
-./scripts/build-llama.sh        # llama.cpp -DGGML_NATIVE=ON
-./scripts/start-native.sh       # chat :8001, embed :8003
-./scripts/smoke-test.sh         # OpenAI-compatible /v1
+./scripts/start-stack.sh        # detect + модели + llama + postgres + LiteLLM
+./scripts/smoke-test.sh         # /v1/models, chat, embeddings, RAG
+./scripts/create-key.sh dev-ivan
 ```
 
-Стоп: `./scripts/start-native.sh stop`.
+Стоп движков: `./scripts/start-stack.sh stop` (Postgres остаётся).
 
-Клиент (без LiteLLM):
+Клиенты ходят **только** в LiteLLM:
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:8001/v1", api_key="sk-backend")
+client = OpenAI(base_url="http://127.0.0.1:4000/v1", api_key="sk-КЛЮЧ")
 client.chat.completions.create(model="qwen-chat", messages=[{"role": "user", "content": "ping"}])
+client.embeddings.create(model="qwen-embed", input="hello")
 ```
 
-Чтобы поднять полный стек через Compose на Linux: `LLAMA_CPU_VARIANT=native` в `.env` (после `detect-hw.sh`) и `docker compose up --build -d`. На 16 GB держите `LLM_MEM_LIMIT=10g` и не включайте `stt` вместе с 9B.
+Админка: http://127.0.0.1:4000/ui — пользователь `admin`, пароль = `LITELLM_MASTER_KEY`.
+
+Прямой llama-server (`:8001` / `:8003`) остаётся для отладки. Если нужен Compose целиком: `LLAMA_CPU_VARIANT=native` и `docker compose up --build -d`. На 16 GB не поднимайте `stt` вместе с 9B; либо `docker compose up -d db litellm` с `CHAT_API_BASE=http://host.docker.internal:8001/v1`.
 
 ## 0. Docker Desktop
 

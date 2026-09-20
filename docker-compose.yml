@@ -161,16 +161,21 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
       llm:
         condition: service_healthy
+        required: false
       embed:
         condition: service_healthy
+        required: false
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-localnexus-admin}
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@db:5432/${POSTGRES_DB:-nexus}
+      CHAT_API_BASE: ${CHAT_API_BASE:-http://llm:8001/v1}
       EMBED_API_BASE: ${EMBED_API_BASE:-http://embed:8003/v1}
       STORE_MODEL_IN_DB: "True"
       LITELLM_LOG: INFO
