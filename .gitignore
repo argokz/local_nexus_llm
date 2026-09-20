@@ -1,4 +1,6 @@
 .env
+host.auto.env
+llama-server
 models/
 data/
 tei-data/

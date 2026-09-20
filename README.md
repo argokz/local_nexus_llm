@@ -1,18 +1,50 @@
 # localNexus sandbox (this PC)
 
-Песочница перед нормальным железом. Клиенты ходят **только в LiteLLM** (`:4000`). Движки за прокси с LAN не торчат.
+Песочница перед нормальным железом. Клиенты ходят **только в LiteLLM** (`:4000`) — кроме Linux native-режима ниже, где можно стучаться прямо в llama-server. Движки за прокси с LAN не торчат.
 
 ```
 Клиент / OpenAI SDK / Admin UI
         │
         ▼
- LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF Q4, CPU)
+ LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF, CPU)
         │       ──► llama.cpp  qwen-embed  (слот TEI на этой CPU)
         │       ──► faster-whisper         (профиль stt, не в первом up)
         └──────► Postgres + pgvector       (ключи LiteLLM + чанки RAG)
 ```
 
+Два профиля железа:
+
+| Профиль | CPU | Модель chat (алиас всё равно `qwen-chat`) |
+|---|---|---|
+| **sandbox** (Windows i7-2600) | только AVX, нет AVX2 | Qwen3-4B Q4_K_M |
+| **host** (Linux AVX2 / AVX-512 / AMX, ≥14 GB RAM) | `GGML_NATIVE` | Qwen3.5-9B Q5_K_M |
+
 На i7-2600 нет AVX2. Ollama и готовый TEI CPU-образ часто падают с `Illegal instruction`. Поэтому эмбеддинги в первом прогоне — тот же llama.cpp, алиас в LiteLLM всё равно `qwen-embed`. TEI включается профилем, когда CPU умеет AVX2.
+
+## Linux (этот хост, без Docker)
+
+На машине без NVIDIA, с AVX2+ и ~16 GB RAM Docker не обязателен: mmap GGUF с диска + нативный `llama-server` съедает меньше RAM, чем Compose.
+
+```bash
+chmod +x scripts/*.sh
+./scripts/detect-hw.sh          # пишет host.auto.env (не коммитить)
+./scripts/download-models.sh    # Qwen3.5-9B Q5 + Qwen3-Embedding-0.6B
+./scripts/build-llama.sh        # llama.cpp -DGGML_NATIVE=ON
+./scripts/start-native.sh       # chat :8001, embed :8003
+./scripts/smoke-test.sh         # OpenAI-compatible /v1
+```
+
+Стоп: `./scripts/start-native.sh stop`.
+
+Клиент (без LiteLLM):
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:8001/v1", api_key="sk-backend")
+client.chat.completions.create(model="qwen-chat", messages=[{"role": "user", "content": "ping"}])
+```
+
+Чтобы поднять полный стек через Compose на Linux: `LLAMA_CPU_VARIANT=native` в `.env` (после `detect-hw.sh`) и `docker compose up --build -d`. На 16 GB держите `LLM_MEM_LIMIT=10g` и не включайте `stt` вместе с 9B.
 
 ## 0. Docker Desktop
 

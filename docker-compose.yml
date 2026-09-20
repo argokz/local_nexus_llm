@@ -41,10 +41,12 @@ services:
     command: ["bash", "-lc", "cp -nv /src/*.gguf /dst/ && ls -lh /dst"]
 
   llm:
-    image: localnexus-llama-server:avx
+    image: localnexus-llama-server:${LLAMA_CPU_VARIANT:-avx}
     build:
       context: .
       dockerfile: docker/llama.cpp.Dockerfile
+      args:
+        LLAMA_CPU_VARIANT: ${LLAMA_CPU_VARIANT:-avx}
     restart: unless-stopped
     depends_on:
       modelsync:
@@ -77,14 +79,16 @@ services:
       timeout: 5s
       retries: 40
       start_period: 300s
-    mem_limit: 8g
+    mem_limit: ${LLM_MEM_LIMIT:-8g}
     cpus: 4.0
 
   embed:
-    image: localnexus-llama-server:avx
+    image: localnexus-llama-server:${LLAMA_CPU_VARIANT:-avx}
     build:
       context: .
       dockerfile: docker/llama.cpp.Dockerfile
+      args:
+        LLAMA_CPU_VARIANT: ${LLAMA_CPU_VARIANT:-avx}
     restart: unless-stopped
     depends_on:
       modelsync:
