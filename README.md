@@ -6,9 +6,9 @@
 Клиент / OpenAI SDK / Admin UI
         │
         ▼
- LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF, CPU)
+ LiteLLM :4000  ──► llama.cpp  qwen-chat   (GGUF, CPU; CUDA если есть GPU)
         │       ──► llama.cpp  qwen-embed  (слот TEI на этой CPU)
-        │       ──► faster-whisper         (профиль stt, не в первом up)
+        │       ──► faster-whisper         (host :8000 / Compose --profile stt)
         └──────► Postgres + pgvector       (ключи LiteLLM + чанки RAG)
 ```
 
@@ -23,14 +23,22 @@
 
 ## Linux (этот хост)
 
-На 16 GB RAM Docker с 9B внутри не влезает. Полный контур здесь:
+Рабочая копия: **`~/projects/localNexus`** (на Windows — `H:\projects\localNexus`).
 
-`llama-server` на хосте (AVX-512/AMX) → **LiteLLM :4000** → Postgres/pgvector.
+Этот Cloud Agent **без GPU**: нет `nvidia-smi`, нет `/dev/nvidia*`, нет `/dev/dri`. `LLAMA_NGL=0`, chat/embed/whisper идут на CPU (AVX-512/AMX).
+
+На 16 GB RAM Docker с 9B внутри не влезает. Полный контур **без Docker**:
+
+`llama-server` на хосте → **LiteLLM :4000** → Postgres/pgvector → faster-whisper `:8000`.
 
 ```bash
+mkdir -p ~/projects
+# если репозиторий ещё не здесь:
+#   git clone <url> ~/projects/localNexus
+cd ~/projects/localNexus
 chmod +x scripts/*.sh
-./scripts/start-stack.sh        # detect + модели + llama + postgres + LiteLLM
-./scripts/smoke-test.sh         # /v1/models, chat, embeddings, RAG
+./scripts/start-stack.sh        # detect + llama + postgres + whisper + LiteLLM
+./scripts/smoke-test.sh         # /v1/models, chat, embeddings, RAG, whisper
 ./scripts/create-key.sh dev-ivan
 ```
 
@@ -47,7 +55,7 @@ client.embeddings.create(model="qwen-embed", input="hello")
 
 Админка: http://127.0.0.1:4000/ui — пользователь `admin`, пароль = `LITELLM_MASTER_KEY`.
 
-Прямой llama-server (`:8001` / `:8003`) остаётся для отладки. Если нужен Compose целиком: `LLAMA_CPU_VARIANT=native` и `docker compose up --build -d`. На 16 GB не поднимайте `stt` вместе с 9B; либо `docker compose up -d db litellm` с `CHAT_API_BASE=http://host.docker.internal:8001/v1`.
+Прямой llama-server (`:8001` / `:8003`) и whisper (`:8000`) — только localhost, для отладки. Если нужен Compose целиком: `LLAMA_CPU_VARIANT=native` и `docker compose up --build -d`. На 16 GB не поднимайте Docker-`stt` вместе с 9B внутри контейнера.
 
 ## 0. Docker Desktop
 
@@ -157,15 +165,23 @@ docker compose --profile tei up -d tei
 docker compose up -d litellm
 ```
 
-Whisper:
+Whisper (Linux host, **без Docker**):
+
+```bash
+./scripts/start-whisper.sh          # medium int8 на CPU, если после 9B свободно ≥2.2 GB
+```
+
+Почему medium сразу не поднялся: native `start-stack.sh` раньше не запускал STT. В Compose это отдельный `--profile stt`, и там стоит **small**, не medium. На этой машине нет CUDA, а Qwen3.5-9B Q5 уже занимает ~9 GB RSS при 16 GB без swap — medium (~1.5 GB int8) ставится отдельно и только если хватает `MemAvailable`. `large-v3` на этом CPU не включайте.
+
+Windows Compose:
 
 ```powershell
 docker compose --profile stt up -d whisper
 ```
 
-Потом в UI можно выдать ключу модель `whisper-1`. На этом CPU `large-v3` не включайте — только `small`.
+Потом в UI можно выдать ключу модель `whisper-1`.
 
-GPU позже: в `.env` `LLAMA_NGL=99`, пересборка llama.cpp с CUDA, TEI-образ `cuda-*`. Клиенты и ключи не меняются.
+GPU позже: в `.env` `LLAMA_NGL=99`, пересборка llama.cpp с CUDA, faster-whisper `device=cuda`. Клиенты и ключи не меняются.
 
 ## 5. Что смотреть, если не встаёт
 

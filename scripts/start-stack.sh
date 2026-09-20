@@ -7,13 +7,14 @@ cd "$ROOT"
 
 if [[ "${1:-}" == "stop" ]]; then
   ./scripts/start-litellm.sh stop || true
+  ./scripts/start-whisper.sh stop || true
   ./scripts/start-native.sh stop || true
   echo "stack stopped (postgres left running)"
   exit 0
 fi
 
 chmod +x scripts/*.sh
-[[ -f host.auto.env ]] || ./scripts/detect-hw.sh
+./scripts/detect-hw.sh
 [[ -f models/qwen-chat.gguf ]] || ./scripts/download-models.sh
 if [[ ! -x "$HOME/src/llama.cpp/build/bin/llama-server" && ! -x "$ROOT/llama-server" ]]; then
   ./scripts/build-llama.sh
@@ -26,12 +27,21 @@ else
 fi
 
 ./scripts/start-postgres.sh
+
+# Native STT (no Docker). Skipped only if RAM is too tight after 9B.
+if [[ "${START_WHISPER:-1}" != "0" ]]; then
+  ./scripts/start-whisper.sh || echo "whisper not started (chat/embed still up)"
+else
+  echo "whisper skipped (START_WHISPER=0)"
+fi
+
 ./scripts/start-litellm.sh
 
 # First LiteLLM Prisma baseline of a non-empty DB can drop RAG tables. Re-apply.
+# stdin: postgres cannot open files inside a private home directory.
 PGUSER="${POSTGRES_USER:-nexus}"
 PGDB="${POSTGRES_DB:-nexus}"
-sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -f "$ROOT/sql/01-init.sql"
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 < "$ROOT/sql/01-init.sql"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "ALTER TABLE IF EXISTS chunks OWNER TO ${PGUSER};"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PGUSER};"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PGUSER};"
@@ -40,6 +50,7 @@ echo
 echo "=== stack up ==="
 echo "API      http://127.0.0.1:4000/v1"
 echo "Admin UI http://127.0.0.1:4000/ui"
+echo "Whisper  http://127.0.0.1:8000/health  (via LiteLLM model whisper-1)"
 echo "Smoke    ./scripts/smoke-test.sh"
 echo "RAG      ./scripts/rag_smoke.py  (via smoke-test.sh)"
 echo "Key      ./scripts/create-key.sh dev-ivan"

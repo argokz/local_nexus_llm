@@ -26,6 +26,7 @@ HAS_AVX2=0
 HAS_AVX512=0
 HAS_AMX=0
 HAS_NVIDIA=0
+HAS_DRM=0
 CPU_VARIANT=avx
 PROFILE=sandbox-4b
 CHAT_HF_REPO="unsloth/Qwen3-4B-GGUF"
@@ -36,7 +37,12 @@ LLM_MEM_LIMIT=8g
 has_flag avx2 && HAS_AVX2=1
 has_flag avx512f && HAS_AVX512=1
 has_flag amx_int8 && HAS_AMX=1
-command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && HAS_NVIDIA=1
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+  HAS_NVIDIA=1
+elif [[ -e /dev/nvidia0 ]]; then
+  HAS_NVIDIA=1
+fi
+[[ -e /dev/dri/renderD128 ]] && HAS_DRM=1
 
 if [[ "$HAS_AVX2" -eq 1 || "$HAS_AVX512" -eq 1 ]]; then
   CPU_VARIANT=native
@@ -74,8 +80,17 @@ else
 fi
 
 NGL=0
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_MODEL=small
 if [[ "$HAS_NVIDIA" -eq 1 ]]; then
   NGL=99
+  WHISPER_DEVICE=cuda
+  WHISPER_COMPUTE_TYPE=float16
+  WHISPER_MODEL=medium
+elif [[ "$MEM_GB" -ge 14 ]]; then
+  # 16 GB host: try medium int8; start-whisper.sh falls back to small if 9B left too little RAM.
+  WHISPER_MODEL=medium
 fi
 
 cat >"$OUT" <<EOF
@@ -92,12 +107,17 @@ LLAMA_THREADS=$THREADS
 LLAMA_CTX=$CTX
 LLAMA_NGL=$NGL
 LLM_MEM_LIMIT=$LLM_MEM_LIMIT
+WHISPER_DEVICE=$WHISPER_DEVICE
+WHISPER_COMPUTE_TYPE=$WHISPER_COMPUTE_TYPE
+WHISPER_MODEL=$WHISPER_MODEL
+WHISPER_PORT=8000
 EOF
 
 {
   echo "mem_total_gb=$MEM_GB mem_avail_gb=$AVAIL_GB threads=$THREADS"
-  echo "avx2=$HAS_AVX2 avx512=$HAS_AVX512 amx=$HAS_AMX nvidia=$HAS_NVIDIA"
+  echo "avx2=$HAS_AVX2 avx512=$HAS_AVX512 amx=$HAS_AMX nvidia=$HAS_NVIDIA drm=$HAS_DRM"
   echo "cpu_variant=$CPU_VARIANT profile=$PROFILE"
   echo "chat=$CHAT_HF_REPO/$CHAT_HF_FILE ctx=$CTX ngl=$NGL"
+  echo "whisper device=$WHISPER_DEVICE compute=$WHISPER_COMPUTE_TYPE model=$WHISPER_MODEL"
   echo "wrote $OUT"
 } >&2

@@ -14,6 +14,7 @@ PGDB="${POSTGRES_DB:-nexus}"
 DATABASE_URL="${DATABASE_URL:-postgresql://${PGUSER}:${PGPASSWORD_VALUE}@127.0.0.1:5432/${PGDB}}"
 CHAT_API_BASE="${CHAT_API_BASE:-http://127.0.0.1:8001/v1}"
 EMBED_API_BASE="${EMBED_API_BASE:-http://127.0.0.1:8003/v1}"
+WHISPER_API_BASE="${WHISPER_API_BASE:-http://127.0.0.1:8000/v1}"
 VENV="${LITELLM_VENV:-$ROOT/.venv}"
 LOG="$ROOT/data/logs/litellm.log"
 PIDFILE="$ROOT/data/pids/litellm.pid"
@@ -65,6 +66,9 @@ fi
 if [[ "$EMBED_API_BASE" == *"://embed:"* ]] || [[ "$EMBED_API_BASE" == *"://tei:"* ]]; then
   EMBED_API_BASE="http://127.0.0.1:8003/v1"
 fi
+if [[ "$WHISPER_API_BASE" == *"://whisper:"* ]]; then
+  WHISPER_API_BASE="http://127.0.0.1:8000/v1"
+fi
 if [[ "$DATABASE_URL" == *"@db:"* ]]; then
   DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD_VALUE}@127.0.0.1:5432/${PGDB}"
 fi
@@ -75,10 +79,11 @@ export LITELLM_MASTER_KEY="$MASTER"
 export DATABASE_URL
 export CHAT_API_BASE
 export EMBED_API_BASE
+export WHISPER_API_BASE
 export STORE_MODEL_IN_DB=True
 export LITELLM_LOG="${LITELLM_LOG:-INFO}"
 
-echo "Starting LiteLLM on :$PORT (chat=$CHAT_API_BASE embed=$EMBED_API_BASE)"
+echo "Starting LiteLLM on :$PORT (chat=$CHAT_API_BASE embed=$EMBED_API_BASE whisper=$WHISPER_API_BASE)"
 nohup "$VENV/bin/litellm" --config "$ROOT/litellm/config.yaml" --port "$PORT" --host 0.0.0.0 \
   >"$LOG" 2>&1 &
 echo $! >"$PIDFILE"

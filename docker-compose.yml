@@ -151,6 +151,7 @@ services:
     image: fedirz/faster-whisper-server:latest-cpu
     restart: unless-stopped
     environment:
+      # Windows sandbox / Compose: small. Linux host without Docker uses scripts/start-whisper.sh (medium on CPU if RAM allows).
       WHISPER_MODEL: Systran/faster-whisper-small
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
@@ -177,6 +178,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@db:5432/${POSTGRES_DB:-nexus}
       CHAT_API_BASE: ${CHAT_API_BASE:-http://llm:8001/v1}
       EMBED_API_BASE: ${EMBED_API_BASE:-http://embed:8003/v1}
+      WHISPER_API_BASE: ${WHISPER_API_BASE:-http://whisper:8000/v1}
       STORE_MODEL_IN_DB: "True"
       LITELLM_LOG: INFO
     volumes:

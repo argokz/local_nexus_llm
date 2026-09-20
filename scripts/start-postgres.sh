@@ -51,7 +51,8 @@ GRANT ALL PRIVILEGES ON DATABASE ${PGDB} TO ${PGUSER};
 SQL
 
 # pgvector + chunks. Superuser is required for CREATE EXTENSION.
-sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -f "$SQL"
+# Feed SQL on stdin: postgres cannot read files under a 0700/0750 home directory.
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 < "$SQL"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "ALTER TABLE IF EXISTS chunks OWNER TO ${PGUSER};"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PGUSER};"
 sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PGUSER};"

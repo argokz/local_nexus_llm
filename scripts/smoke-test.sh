@@ -80,6 +80,30 @@ if [[ "$ORIGIN" == *":4000"* ]]; then
   "$PY" "$ROOT/scripts/rag_smoke.py"
 fi
 
+if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+  echo "== whisper (faster-whisper via LiteLLM) =="
+  curl -fsS http://127.0.0.1:8000/health
+  echo
+  WAV="$ROOT/data/logs/smoke-whisper.wav"
+  mkdir -p "$ROOT/data/logs"
+  if command -v espeak-ng >/dev/null 2>&1; then
+    espeak-ng -v en -s 140 -w "$WAV" "pong"
+  elif command -v espeak >/dev/null 2>&1; then
+    espeak -v en -s 140 -w "$WAV" "pong"
+  else
+    echo "no espeak-ng; skip transcription fixture"
+    WAV=""
+  fi
+  if [[ -n "${WAV}" && -f "$WAV" ]]; then
+    transcribe_url="$ORIGIN/v1/audio/transcriptions"
+    [[ "$ORIGIN" == *":8001"* ]] && transcribe_url="http://127.0.0.1:8000/v1/audio/transcriptions"
+    curl -fsS -H "Authorization: Bearer $MASTER" \
+      -F "file=@${WAV}" -F "model=whisper-1" -F "language=en" \
+      "$transcribe_url"
+    echo
+  fi
+fi
+
 echo
 echo "API: $ORIGIN/v1"
 echo "Chat model alias: qwen-chat"
