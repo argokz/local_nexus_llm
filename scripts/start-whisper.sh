@@ -66,12 +66,33 @@ else
 fi
 echo "MemAvailable=$(avail_kb) kB  SwapTotal=$(awk '/SwapTotal:/ {print $2}' /proc/meminfo) kB"
 
+# 16 GB host + 9B chat + medium whisper: add a small swap file if the VM has none.
+ensure_swap() {
+  local swap_kb
+  swap_kb="$(awk '/SwapTotal:/ {print $2}' /proc/meminfo)"
+  if [[ "${swap_kb:-0}" -ge 2000000 ]]; then
+    return 0
+  fi
+  local swapfile="/var/tmp/localnexus.swap"
+  if [[ ! -f "$swapfile" ]]; then
+    echo "creating 4G swap at $swapfile (no GPU, 9B + whisper on 16 GB)"
+    sudo fallocate -l 4G "$swapfile" || sudo dd if=/dev/zero of="$swapfile" bs=1M count=4096 status=none
+    sudo chmod 600 "$swapfile"
+    sudo mkswap "$swapfile" >/dev/null
+  fi
+  sudo swapon "$swapfile" 2>/dev/null || true
+  echo "SwapTotal=$(awk '/SwapTotal:/ {print $2}' /proc/meminfo) kB"
+}
+
 # medium int8 ~1.5 GB weights + ~700 MB workspace. small ~500 MB.
 need_kb_medium=2300000
 need_kb_small=900000
 MODEL="$WANTED_MODEL"
 # HuggingFace repo ids stay as-is; size aliases (medium/small) are faster-whisper names.
 if [[ "$DEVICE" != "cuda" ]]; then
+  if [[ "$WANTED_MODEL" == "medium" || "$WANTED_MODEL" == *faster-whisper-medium* ]]; then
+    ensure_swap
+  fi
   avail="$(avail_kb)"
   if [[ "$WANTED_MODEL" == "medium" || "$WANTED_MODEL" == *faster-whisper-medium* ]]; then
     if [[ "$avail" -lt "$need_kb_medium" ]]; then
