@@ -28,6 +28,14 @@ fi
 ./scripts/start-postgres.sh
 ./scripts/start-litellm.sh
 
+# First LiteLLM Prisma baseline of a non-empty DB can drop RAG tables. Re-apply.
+PGUSER="${POSTGRES_USER:-nexus}"
+PGDB="${POSTGRES_DB:-nexus}"
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -f "$ROOT/sql/01-init.sql"
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "ALTER TABLE IF EXISTS chunks OWNER TO ${PGUSER};"
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PGUSER};"
+sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PGUSER};"
+
 echo
 echo "=== stack up ==="
 echo "API      http://127.0.0.1:4000/v1"

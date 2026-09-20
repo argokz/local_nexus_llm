@@ -49,6 +49,15 @@ if [[ ! -x "$VENV/bin/litellm" ]]; then
   "$VENV/bin/pip" install 'litellm[proxy]' 'psycopg[binary]' prisma
 fi
 
+# Prisma Client Python needs generated engines before the proxy can open the DB.
+export PATH="$VENV/bin:${HOME}/.nvm/versions/node/current/bin:${HOME}/.nvm/versions/node/v22.22.2/bin:/usr/bin:$PATH"
+SCHEMA="$VENV/lib/python3.12/site-packages/litellm/proxy/schema.prisma"
+if [[ -f "$SCHEMA" ]]; then
+  echo "prisma generate ..."
+  DATABASE_URL="${DATABASE_URL:-postgresql://${PGUSER}:${PGPASSWORD_VALUE}@127.0.0.1:5432/${PGDB}}" \
+    "$VENV/bin/prisma" generate --schema="$SCHEMA"
+fi
+
 # If chat/embed env still point at Docker DNS names, retarget to host llama-server.
 if [[ "$CHAT_API_BASE" == *"://llm:"* ]]; then
   CHAT_API_BASE="http://127.0.0.1:8001/v1"
@@ -76,9 +85,14 @@ echo $! >"$PIDFILE"
 
 echo "Waiting for LiteLLM ..."
 ready=0
-for i in $(seq 1 90); do
+for i in $(seq 1 180); do
   if curl -fsS "http://127.0.0.1:${PORT}/health/liveliness" >/dev/null 2>&1; then
     ready=1
+    break
+  fi
+  # If the process died, fail fast with logs.
+  if [[ -f "$PIDFILE" ]] && ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    echo "LiteLLM process exited." >&2
     break
   fi
   sleep 2

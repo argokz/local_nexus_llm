@@ -25,23 +25,26 @@ if [[ -z "$BASE" ]]; then
 fi
 
 auth=(-H "Authorization: Bearer $MASTER" -H "Content-Type: application/json")
+ORIGIN="$BASE"
+ORIGIN="${ORIGIN%/}"
+[[ "$ORIGIN" == */v1 ]] && ORIGIN="${ORIGIN%/v1}"
 
 echo "== wait for API =="
 ready=0
 for i in $(seq 1 60); do
-  if curl -fsS "$BASE/health" >/dev/null 2>&1 || curl -fsS "$BASE/health/liveliness" >/dev/null 2>&1; then
+  if curl -fsS "$ORIGIN/health" >/dev/null 2>&1 || curl -fsS "$ORIGIN/health/liveliness" >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 5
 done
 if [[ "$ready" -ne 1 ]]; then
-  echo "API is not up on $BASE" >&2
+  echo "API is not up on $ORIGIN" >&2
   exit 1
 fi
 
 echo "== /v1/models =="
-curl -fsS "${auth[@]}" "$BASE/v1/models" | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(m.get('id','') for m in d.get('data',[])))"
+curl -fsS "${auth[@]}" "$ORIGIN/v1/models" | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(m.get('id','') for m in d.get('data',[])))"
 
 echo "== chat =="
 chat_json="$(curl -fsS "${auth[@]}" -d '{
@@ -49,7 +52,7 @@ chat_json="$(curl -fsS "${auth[@]}" -d '{
   "max_tokens":32,
   "temperature":0,
   "messages":[{"role":"user","content":"Reply with exactly one word: pong"}]
-}' "$BASE/v1/chat/completions")"
+}' "$ORIGIN/v1/chat/completions")"
 echo "$chat_json" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
@@ -58,28 +61,28 @@ usage=d.get("usage") or {}
 print("tokens prompt=%s completion=%s" % (usage.get("prompt_tokens"), usage.get("completion_tokens")))
 '
 
-if curl -fsS http://127.0.0.1:8003/health >/dev/null 2>&1 || [[ "$BASE" == *":4000"* ]]; then
+if curl -fsS http://127.0.0.1:8003/health >/dev/null 2>&1 || [[ "$ORIGIN" == *":4000"* ]]; then
   echo "== embeddings =="
-  emb_base="$BASE"
-  [[ "$BASE" == *":8001"* ]] && emb_base="http://127.0.0.1:8003"
-  dim="$(curl -fsS "${auth[@]}" -d '{"model":"qwen-embed","input":"localNexus sandbox"}' "$emb_base/v1/embeddings" \
+  emb_origin="$ORIGIN"
+  [[ "$ORIGIN" == *":8001"* ]] && emb_origin="http://127.0.0.1:8003"
+  dim="$(curl -fsS "${auth[@]}" -d '{"model":"qwen-embed","input":"localNexus sandbox"}' "$emb_origin/v1/embeddings" \
     | python3 -c "import json,sys; print(len(json.load(sys.stdin)['data'][0]['embedding']))")"
   echo "dim=$dim"
 fi
 
-if [[ "$BASE" == *":4000"* ]]; then
+if [[ "$ORIGIN" == *":4000"* ]]; then
   echo "== RAG (LiteLLM + pgvector) =="
   PY="${ROOT}/.venv/bin/python3"
   [[ -x "$PY" ]] || PY=python3
-  LITELLM_URL="$BASE/v1" \
+  LITELLM_URL="$ORIGIN/v1" \
   LITELLM_MASTER_KEY="$MASTER" \
   DATABASE_URL="${DATABASE_URL:-postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus}@127.0.0.1:5432/${POSTGRES_DB:-nexus}}" \
   "$PY" "$ROOT/scripts/rag_smoke.py"
 fi
 
 echo
-echo "API: $BASE/v1"
+echo "API: $ORIGIN/v1"
 echo "Chat model alias: qwen-chat"
-if [[ "$BASE" == *":4000"* ]]; then
-  echo "Admin UI: $BASE/ui  (admin / $MASTER)"
+if [[ "$ORIGIN" == *":4000"* ]]; then
+  echo "Admin UI: $ORIGIN/ui  (admin / $MASTER)"
 fi

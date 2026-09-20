@@ -58,7 +58,7 @@ sudo -u postgres psql -d "$PGDB" -v ON_ERROR_STOP=1 -c "GRANT ALL ON ALL SEQUENC
 
 # Allow password auth from localhost for the app role.
 HBA="/etc/postgresql/16/main/pg_hba.conf"
-if [[ -f "$HBA" ]] && ! grep -q "localnexus-md5" "$HBA"; then
+if [[ -f "$HBA" ]] && ! sudo grep -q "localnexus-md5" "$HBA"; then
   sudo tee -a "$HBA" >/dev/null <<'EOF'
 # localnexus-md5
 host    nexus           nexus           127.0.0.1/32            scram-sha-256
